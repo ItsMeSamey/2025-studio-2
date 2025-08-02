@@ -15,6 +15,9 @@ test {
     }
 }
 
+jar {
+    from sourceSets.main.output
+}
 
 jacocoTestReport {
     dependsOn test

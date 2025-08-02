@@ -34,10 +34,13 @@ task debug(dependsOn: classes, type: JavaExec) {
 }
 
 task dist(type: Jar) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    dependsOn project(':core').tasks.named('jar')
+
     manifest {
         attributes 'Main-Class': project.mainClassName
     }
-    dependsOn configurations.runtimeClasspath
+
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }

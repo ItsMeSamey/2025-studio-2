@@ -1,0 +1,254 @@
+package com.csse3200.game.components;
+
+import com.badlogic.gdx.math.Vector2;
+import com.csse3200.game.entities.Entity;
+import com.csse3200.game.physics.components.ColliderComponent;
+import com.csse3200.game.rendering.TextureRenderComponent;
+import com.csse3200.game.services.ServiceLocator;
+
+/**
+ * Component for button entities that can be pushed by the player to trigger other events
+ * Class controls the state of the button (normal or pushed) and
+ * the button colour based on the type (door, platform or nothing)
+ */
+public class ButtonComponent extends Component {
+    private boolean isPushed = false;
+    private String type; //type of button
+
+    private boolean playerInRange = false;
+    private ColliderComponent playerCollider = null;
+    private boolean addToPlayer = false;
+    private String direction = "left";
+
+    private float unpressTimer = 0f;
+    private boolean isTiming = false;
+    private static final float AUTO_UNPRESS_TIME = 15f; //buttons unpress after 5 seconds
+    private ButtonManagerComponent puzzleManager;
+
+    /**
+     * Creates the button
+     */
+    @Override
+    public void create() {
+    }
+
+    /**
+     * Updates the button. If it is a timing button and the time runs out, button
+     *  will unpress and return to original texture
+     */
+    @Override
+    public void update() {
+        if (isTiming && isPushed && (puzzleManager == null || puzzleManager.isPuzzleCompleted())) {
+            unpressTimer -= ServiceLocator.getTimeSource().getDeltaTime();
+
+            if (unpressTimer <= 0f) {
+                isTiming = false;
+                isPushed = false;
+
+                String texture = "images/button.png";
+                TextureRenderComponent render = entity.getComponent(TextureRenderComponent.class);
+                if (render != null) {
+                    render.setTexture(texture);
+                }
+
+                entity.getEvents().trigger("buttonToggled", false);
+            }
+        }
+    }
+
+    /**
+     * Sets whether a player is in interaction range of this button
+     * Adds the player to the "interact" event the first time
+     *
+     * @param collider Player's ColliderComponent (null if player leaves collision range)
+     */
+    public void setPlayerInRange(ColliderComponent collider) {
+        //not in range if not colliding, return from function
+        if(collider == null) {
+            playerInRange = false;
+            playerCollider = null;
+            return;
+        }
+
+        playerInRange = true;
+        playerCollider = collider;
+
+        //adds player to event if not already
+        if(!addToPlayer) {
+            Entity player = playerCollider.getEntity();
+            player.getEvents().addListener("interact", this::onPlayerInteract);
+            addToPlayer = true;
+        }
+
+    }
+
+    /**
+     * Handles players interaction when they press 'E' (defined in KeyboardPlayerInputComponent)
+     * Only toggles the button if the player is currently colliding with button
+     */
+    private void onPlayerInteract() {
+        if( !playerInRange || playerCollider == null) { return;}
+
+        Entity playerEntity = playerCollider.getEntity();
+
+        Vector2 playerPos = playerEntity.getPosition();
+        Vector2 buttonPos = entity.getPosition();
+
+        float dx = playerPos.x - buttonPos.x;
+        float dy = playerPos.y - buttonPos.y;
+
+        switch (direction) {
+            case "left":
+                if (dx < -0.3f && Math.abs(dy) < 0.6f) {
+                    toggleButton();
+                }
+                break;
+            case "right":
+                if (dx > -0.1f && Math.abs(dy) < 0.6f) {
+                    toggleButton();
+                }
+                break;
+            case "down":
+                if (dy < -0.3f && Math.abs(dx) < 0.6f) {
+                    toggleButton();
+                }
+                break;
+            case "up":
+                if (dy > 0.3f && Math.abs(dx) < 0.6f) {
+                    toggleButton();
+                }
+                break;
+        }
+    }
+
+    /**
+     * Toggles the buttons state and updates its texture based on its type
+     * If the puzzle manager isn't active or puzzle isn't completed, buttons will automatically unpress
+     *  after set amount of time (standard time only)
+     * Triggers buttonToggled event that can be listened for so events can be implemented on push
+     */
+    private void toggleButton() {
+        isPushed = !isPushed;
+        entity.getEvents().trigger("buttonToggled", isPushed);
+
+        // set button texture based on its type
+
+        if(isPushed) {
+            if(puzzleManager == null || puzzleManager.isPuzzleCompleted()) {
+                if(!"platform".equals(type) && !"door".equals(type) && isPushed) {
+                    unpressTimer = AUTO_UNPRESS_TIME;
+                    isTiming = true;
+                }
+            }
+        }
+
+        if (puzzleManager != null && isPushed) {
+            puzzleManager.onButtonPressed();
+        }
+
+        if("platform".equals(type)) {
+            String texture = isPushed ? "images/blue_button_pushed.png" : "images/blue_button.png";
+            TextureRenderComponent render = entity.getComponent(TextureRenderComponent.class);
+            if (render != null) {
+                render.setTexture(texture);
+            }
+        }else if("door".equals(type)) {
+            String texture = isPushed ? "images/red_button_pushed.png" : "images/red_button.png";
+            TextureRenderComponent render = entity.getComponent(TextureRenderComponent.class);
+            if (render != null) {
+                render.setTexture(texture);
+            }
+        }else {
+            String texture = isPushed ? "images/button_pushed.png" : "images/button.png";
+            TextureRenderComponent render = entity.getComponent(TextureRenderComponent.class);
+            if (render != null) {
+                render.setTexture(texture);
+            }
+        }
+    }
+
+    /**
+     * Sets the direction the button will face, for both texture and pressing logic
+     * Automatically left unless otherwise specified (right, up, down)
+     *
+     * @param direction The direction string to set
+     */
+    public void setDirection(String direction) {
+        if (direction == null) {
+            this.direction = "left";
+        } else {
+            this.direction = direction.toLowerCase();
+        }
+    }
+
+    /**
+     * Forces the button to unpress immediately regardless of current state or timer
+     * Resets texture, stops timer and triggers buttonToggled event (with false as unpressed)
+     */
+    public void forceUnpress() {
+        if (!isPushed) {
+            return;
+        }
+        isPushed = false;
+        isTiming = false;
+        unpressTimer = 0f;
+
+        String texture = "images/button.png";
+        TextureRenderComponent render = entity.getComponent(TextureRenderComponent.class);
+        if (render != null) {
+            render.setTexture(texture);
+        }
+        entity.getEvents().trigger("buttonToggled", false);
+    }
+
+    /**
+     * Assigns a puzzle manager to the button, so manager can be notified when its pressed
+     *
+     * @param puzzleManager the ButtonManagerComponent managing this button
+     */
+    public void setPuzzleManager(ButtonManagerComponent puzzleManager) {
+        this.puzzleManager = puzzleManager;
+    }
+
+    /**
+     * Sets the type for this button (which selects texture)
+     *
+     * @param type String representing the button type (door, platform or nothing)
+     */
+    public void setType(String type) {
+        this.type = type;
+    }
+
+    /**
+     * Checks if the player is currently in range of the button.
+     *
+     * @return true if the player is in range, false otherwise
+     */
+    public boolean isPlayerInRange() {
+        return playerInRange;
+    }
+
+    /**
+     * Retrieves the ColliderComponent of the player currently interacting with the box
+     *
+     * @return  the player's ColliderComponent, or null if no player is in range
+     */
+    public ColliderComponent getPlayerCollider() {
+        return  playerCollider;
+    }
+
+    /**
+     * Sets the buttons pushed state manually [for future implementations]
+     * @param pushed state to set the button to
+     */
+    public void setPushed(boolean pushed) {
+        this.isPushed = pushed;
+    }
+
+    /**
+     * Returns true if button is pushed, false otherwise
+     */
+    public boolean isPushed() {
+        return isPushed;
+    }
+}

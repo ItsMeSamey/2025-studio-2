@@ -1,0 +1,655 @@
+package com.csse3200.game.screens;
+
+import com.badlogic.gdx.Gdx;
+import com.badlogic.gdx.Input;
+import com.badlogic.gdx.ScreenAdapter;
+import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.Pixmap;
+import com.badlogic.gdx.math.Vector2;
+import com.badlogic.gdx.scenes.scene2d.Stage;
+import com.crashinvaders.vfx.VfxManager;
+import com.csse3200.game.GdxGame;
+import com.csse3200.game.areas.*;
+import com.csse3200.game.areas.terrain.GridFactory;
+import com.csse3200.game.components.LeaderboardComponent;
+import com.csse3200.game.components.computerterminal.SimpleCaptchaBank;
+import com.csse3200.game.components.computerterminal.SpritesheetSpec;
+import com.csse3200.game.components.computerterminal.TerminalUiComponent;
+import com.csse3200.game.components.deathscreen.DeathScreenDisplay;
+import com.csse3200.game.components.gamearea.GameAreaDisplay;
+import com.csse3200.game.components.gamearea.PerformanceDisplay;
+import com.csse3200.game.components.maingame.MainGameActions;
+import com.csse3200.game.components.minimap.MinimapDisplay;
+import com.csse3200.game.components.obstacles.DoorComponent;
+import com.csse3200.game.components.pausemenu.PauseMenuDisplay;
+import com.csse3200.game.components.pausemenu.PauseMenuDisplay.Tab;
+import com.csse3200.game.components.player.InventoryComponent;
+import com.csse3200.game.components.player.LeaderboardEntryDisplay;
+import com.csse3200.game.components.player.PlayerStatsDisplay;
+import com.csse3200.game.components.statisticspage.StatsTracker;
+import com.csse3200.game.entities.Entity;
+import com.csse3200.game.entities.EntityService;
+import com.csse3200.game.entities.factories.RenderFactory;
+import com.csse3200.game.input.InputDecorator;
+import com.csse3200.game.input.InputService;
+import com.csse3200.game.input.PauseInputComponent;
+import com.csse3200.game.lighting.LightingEngine;
+import com.csse3200.game.lighting.LightingService;
+import com.csse3200.game.lighting.SecurityCamRetrievalService;
+import com.csse3200.game.physics.PhysicsEngine;
+import com.csse3200.game.physics.PhysicsService;
+import com.csse3200.game.rendering.RenderService;
+import com.csse3200.game.rendering.Renderer;
+import com.csse3200.game.services.*;
+import com.csse3200.game.ui.cutscene.CutsceneArea;
+import com.csse3200.game.ui.terminal.TerminalService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import com.csse3200.game.achievements.AchievementService;
+
+
+import java.util.Set;
+
+/**
+ * The game screen containing the main game.
+ *
+ * <p>Details on libGDX screens: https://happycoding.io/tutorials/libgdx/game-screens
+ */
+public class MainGameScreen extends ScreenAdapter {
+  private static final Logger logger = LoggerFactory.getLogger(MainGameScreen.class);
+  private static final String[] mainGameTextures = {"images/playerstats/health.png", "images/playerstats/stamina.png"};
+  private static final String[] TERMINAL_TEXTURES = {
+          "images/terminal_bg.png",
+          "images/terminal_bg_blue.png",
+          // add all your spritesheet puzzles here:
+          "images/puzzles/waldo_4x4.png",
+          "images/puzzles/whichTutor_1x2.png"
+  };
+
+  private static final String PLAYER_DIED = "playerDied";
+
+  // Camera follow parameters
+  private static final Vector2 CAMERA_POSITION = new Vector2(7.5f, 7.5f);
+  private static final float DEADZONE_H_FRAC = 0.40f; // Horizontal deadzone fraction (40% of screen width)
+  private static final float DEADZONE_V_FRAC = 0.35f; // Vertical deadzone fraction (35% of screen height)
+  private static final float CAMERA_LERP_X = 0.0795f; // Camera smoothing factor, lower = smoother
+  private static final float CAMERA_LERP_Y = 0.0573f; // Camera smoothing factor, lower = smoother
+  private static final float MIN_CAMERA_FOLLOW_Y = 1f;
+  private float laserTimer = 0f;
+  private float jumpCount=0;
+  private long lvlStartTime;
+
+  private final GdxGame game;
+  private final Renderer renderer;
+  private final PhysicsEngine physicsEngine;
+  private final LightingEngine lightingEngine;
+  private final GridFactory gridFactory;
+  private boolean paused = false;
+  private PauseMenuDisplay pauseMenuDisplay;
+  private DeathScreenDisplay deathScreenDisplay;
+
+  private Areas gameAreaEnum;
+  private GameArea gameArea;
+
+  private PauseInputComponent pauseInput;
+  private GameTime gameTime;
+  private MinimapDisplay minimapDisplay;
+  private PlayerStatsDisplay playerStatsDisplay;
+  private GameAreaDisplay levelTagDisplay;
+
+  public enum Areas {
+    BEGINNING_CUTSCENE,
+    LEVEL_ONE,
+    LEVEL_ONE_CUTSCENE,
+    LEVEL_TWO,
+    LEVEL_TWO_CUTSCENE,
+    LEVEL_THREE,
+    LEVEL_THREE_CUTSCENE,
+    BOSS_LEVEL,
+    END_CUTSCENE,
+    END_GAME,
+    TUTORIAL,
+    SPRINT_ONE,
+    TEMPLATE,
+    FOREST,
+    CAVE,
+  }
+
+  public MainGameScreen(GdxGame game) {
+    this(game, null);
+  }
+
+  public MainGameScreen(GdxGame game, Areas area) {
+    this.game = game;
+    ServiceLocator.registerMainGameScreen(this);
+
+    logger.debug("Initialising main game screen services");
+    ServiceLocator.registerTimeSource(new GameTime());
+
+    PhysicsService physicsService = new PhysicsService();
+    ServiceLocator.registerPhysicsService(physicsService);
+    physicsEngine = physicsService.getPhysics();
+
+    ServiceLocator.registerInputService(new InputService());
+    ServiceLocator.registerResourceService(new ResourceService());
+
+    ServiceLocator.registerEntityService(new EntityService());
+    ServiceLocator.registerRenderService(new RenderService());
+    TerminalService.register();
+    ServiceLocator.registerVfxService(new VfxManager(Pixmap.Format.RGBA8888));
+
+    // Register service for managing codex entries
+    ServiceLocator.registerCodexService(new CodexService());
+
+    ServiceLocator.registerComputerTerminalService(new ComputerTerminalService());
+
+    renderer = RenderFactory.createRenderer();
+    renderer.getCamera().getEntity().setPosition(CAMERA_POSITION);
+    renderer.getDebug().renderPhysicsWorld(physicsEngine.getWorld());
+
+    // Registering the new lighting service with the service manager
+    LightingService lightingService = new LightingService(renderer.getCamera(), physicsEngine.getWorld());
+    ServiceLocator.registerLightingService(lightingService);
+    lightingEngine = lightingService.getEngine();
+
+    // Registering a new security camera service
+    ServiceLocator.registerSecurityCamRetrievalService(new SecurityCamRetrievalService());
+
+    loadAssets();
+
+    gameTime = new GameTime();
+
+    logger.debug("Initialising main game screen entities");
+    gridFactory = new GridFactory();
+
+    gameAreaEnum = area;
+    gameArea = getGameArea(area /* Areas.LEVEL_THREE */);
+    gameArea.create();
+
+    // As some levels progress to the next level via doors and some via cutscenes ending, add both
+    gameArea.getEvents().addListener("doorEntered", this::handleLeaderboardEntry);
+    gameArea.getEvents().addListener("cutsceneFinished", (Entity play) ->
+        switchArea(getNextArea(gameAreaEnum), play)
+    );
+    gameArea.getEvents().addListener("reset", this::onGameAreaReset);
+    gameArea.getPlayer().getEvents().addListener(PLAYER_DIED, this::showDeathScreen);
+
+    // Have to createUI after the game area .create() since createUI requires the player to exist,
+    // which is only done upon game area creation
+    createUI();
+  }
+
+  public Areas getAreaEnum() {
+    return gameAreaEnum;
+  }
+  /**
+   * Centralized door-entered flow: gather stats, show leaderboard entry, hide HUD,
+   * then resume HUD and switch to next area.
+   */
+  private void handleLeaderboardEntry(Entity player, Entity door) {
+      if (player == null || door == null) {
+          logger.warn("doorEntered: missing player or door; aborting transition.");
+          return;
+      }
+
+      DoorComponent dc = door.getComponent(DoorComponent.class);
+      if (dc == null) {
+          logger.warn("doorEntered: DoorComponent missing on door {}; skipping.", door);
+          return;
+      }
+
+      long completionTime = gameTime.getTimeSince(lvlStartTime);
+
+      // Hide HUD and pause
+      hideHUD();
+      paused = true;
+
+      // Create leaderboard entry overlay
+      LeaderboardEntryDisplay entryDisplay = new LeaderboardEntryDisplay(completionTime);
+      Entity uiEntity = new Entity().addComponent(entryDisplay);
+      ServiceLocator.getEntityService().register(uiEntity);
+
+      // When player finishes entering their name
+      uiEntity.getEvents().addListener("leaderboardEntryComplete", () -> {
+          String name = entryDisplay.getEnteredName();
+          if (name != null && !name.isEmpty()) {
+              LeaderboardComponent.getInstance().updateLeaderboard(getGameAreaName() + name, completionTime);
+          }
+          int levelNum = currentLevelNumber();
+          if (levelNum > 0) {
+              AchievementService.get().onLevelCompleted(levelNum);
+          }
+
+          // Restore HUD and unpause
+          showHUD();
+          paused = false;
+
+          // Now proceed to next area
+          String target = dc.getTargetArea();
+          if (target != null && !target.isEmpty()) {
+              Areas targetEnum = parseTargetArea(target);
+              if (targetEnum != null) {
+                  logger.info("Door entered, switching to explicit target area: {}", targetEnum);
+                  switchArea(targetEnum, player);
+                  return;
+              } else {
+                  logger.warn("doorEntered: unknown targetArea '{}'; falling back.", target);
+              }
+          }
+      });
+  }
+    private int currentLevelNumber() {
+        return switch (gameAreaEnum) {
+            case LEVEL_ONE -> 1;
+            case LEVEL_TWO -> 2;
+            default -> -1; // not a numbered level
+        };
+    }
+
+    /**
+     * Parses a string into a valid Areas enum value.
+     *
+     * @param s the string to parse
+     * @return the corresponding Areas enum if valid, otherwise null
+     */
+    private Areas parseTargetArea(String s) {
+        try {
+            return Areas.valueOf(s.trim());
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+  /**
+   * Get the GameArea name mapped to the current gameAreaEnum.
+   * @return GameArea mapped.
+   */
+  public String getGameAreaName() {
+    return switch (gameAreaEnum) {
+      case TUTORIAL ->  "Tutorial: ";
+      case LEVEL_ONE -> "Level One: ";
+      case LEVEL_TWO -> "Level Two: ";
+      case LEVEL_THREE -> "Level Three: ";
+      case BOSS_LEVEL -> "Boss Level: ";
+      default -> throw new IllegalStateException("Unexpected value: " + gameAreaEnum);
+    };
+  }
+
+  /**
+   * Get the GameArea mapped to the Areas area.
+   * @param area - Areas area.
+   * @return GameArea mapped.
+   */
+  public GameArea getGameArea(Areas area) {
+      lvlStartTime = gameTime.getTime();
+      return switch (area) {
+          case TUTORIAL ->  new TutorialGameArea(gridFactory);
+          case LEVEL_ONE -> new LevelOneGameArea(gridFactory);
+          case LEVEL_TWO -> new LevelTwoGameArea(gridFactory);
+          case LEVEL_THREE -> new LevelThreeGameArea(gridFactory);
+          case BOSS_LEVEL ->  new BossLevelGameArea(gridFactory);
+          case BEGINNING_CUTSCENE -> new CutsceneArea("cutscene-scripts/beginning.txt");
+          case LEVEL_ONE_CUTSCENE -> new CutsceneArea("cutscene-scripts/after-lvl1.txt");
+          case LEVEL_TWO_CUTSCENE -> new CutsceneArea("cutscene-scripts/after-lvl2.txt");
+          case LEVEL_THREE_CUTSCENE -> new CutsceneArea("cutscene-scripts/after-lvl3.txt");
+          case END_CUTSCENE -> new CutsceneArea("cutscene-scripts/end.txt");
+          case END_GAME -> {
+            // Go back to main menu
+            game.setScreen(GdxGame.ScreenType.MAIN_MENU);
+            yield null;
+          }
+          default -> throw new IllegalStateException("Unexpected value: " + area);
+      };
+  }
+
+  /**
+   * Get the Areas area that follows the current Areas game area.
+   * @param area - Current Areas game area.
+   * @return next Areas game area.
+   */
+  public Areas getNextArea(Areas area) {
+    return switch (area) {
+      case BEGINNING_CUTSCENE -> Areas.LEVEL_ONE;
+      case LEVEL_ONE -> Areas.LEVEL_ONE_CUTSCENE;
+      case LEVEL_ONE_CUTSCENE -> Areas.LEVEL_TWO;
+      case LEVEL_TWO -> Areas.LEVEL_TWO_CUTSCENE;
+      case LEVEL_TWO_CUTSCENE -> Areas.LEVEL_THREE;
+      case LEVEL_THREE -> Areas.LEVEL_THREE_CUTSCENE;
+      case LEVEL_THREE_CUTSCENE -> Areas.BOSS_LEVEL;
+      case BOSS_LEVEL -> Areas.END_CUTSCENE;
+      case END_CUTSCENE, TUTORIAL -> Areas.END_GAME;
+      default -> throw new IllegalStateException("Unexpected value: " + area);
+    };
+  }
+
+  private void switchArea(Areas area, Entity player) {
+    Runnable runnable = () -> switchAreaRunnable(area, player);
+    if (gameArea instanceof CutsceneArea) {
+      Gdx.app.postRunnable(runnable);
+    } else {
+      player.getEvents().trigger("startTransition", 1.5f, runnable);
+    }
+  }
+
+
+    /**
+     * Performs the actual area swap to the given target.
+     * Disposes the old area, creates the new one (with player if provided),
+     * and re-registers all global listeners for events.
+     *
+     * @param area   the target area enum
+     * @param player the player entity to transfer to the new area, may be null
+     */
+    public void switchAreaRunnable(Areas area, Entity player) {
+        if (area == null) return;
+
+        // Dispose old area
+        GameArea oldArea = gameArea;
+        if (oldArea != null) {
+            oldArea.dispose();
+        }
+
+        // Build the new area
+        GameArea newArea = getGameArea(area);
+
+        if (newArea != null) {
+          if (newArea instanceof CutsceneArea) {
+            StatsTracker.completeLevel();
+          }
+
+          // Swap in the new area
+          gameArea = newArea;
+          gameAreaEnum = area;
+
+          if (player == null) {
+            gameArea.create();
+          } else {
+            InventoryComponent inv = player.getComponent(InventoryComponent.class);
+            if (inv != null) {
+              inv.resetBag(InventoryComponent.Bag.OBJECTIVES);
+            }
+            gameArea.createWithPlayer(player);
+          }
+
+          gameArea.getEvents().addListener("doorEntered",
+              this::handleLeaderboardEntry);
+          gameArea.getEvents().addListener("cutsceneFinished",
+              (Entity play) -> switchArea(getNextArea(gameAreaEnum), play));
+          gameArea.getEvents().addListener("reset", this::onGameAreaReset);
+        }
+
+        Entity currentPlayer = gameArea.getPlayer();
+        if (currentPlayer != null) {
+            currentPlayer.getEvents().addListener(PLAYER_DIED, this::showDeathScreen);
+        } else {
+            logger.warn("switchAreaRunnable: gameArea.getPlayer() is null after create");
+        }
+    }
+
+
+  /**
+   * Builds the small set of CAPTCHA specs used by the terminal
+   *
+   * Indexing is 0-based, row-major:
+   * top-left = 0, then 1, 2, ... across the row, next row continues
+   */
+  private SimpleCaptchaBank buildCaptchaBank() {
+    SimpleCaptchaBank bank = new SimpleCaptchaBank();
+
+    // 4x4 Waldo puzzle.
+    bank.add(new SpritesheetSpec(
+            "images/puzzles/waldo_4x4.png",
+            4, 4,
+            Set.of(3),
+            "Wheres Waldo? Select all tiles that contain him."
+    ));
+
+    // 1x2 “which tutor” puzzle.
+    // 0 = left tile, 1 = right tile
+    bank.add(new SpritesheetSpec(
+            "images/puzzles/whichTutor_1x2.png",
+            1, 2,
+            Set.of(0),
+            "Which tutor is way better in every regard (not ragebait)"
+    ));
+    return bank;
+  }
+
+    /**
+   * Returns the current game area instance
+   *
+   * @return the current game area instance.
+   */
+  public GameArea getGameArea() {
+    return gameArea;
+  }
+
+
+    @Override
+    public void render(float delta) {
+        if (!paused) {
+            // Update camera position to follow player
+            updateCameraFollow();
+
+            physicsEngine.update();
+            ServiceLocator.getEntityService().update();
+
+            Entity player = gameArea.getPlayer();
+            if (player != null) {
+                // Continuously track player's current position (similar to PlayerActions)
+                Vector2 playerPos = player.getPosition().cpy(); // copy ensures immutability
+
+                if (Gdx.input.isKeyJustPressed(Input.Keys.SPACE)) {
+                    jumpCount++;
+                    // Trigger laser shower based on jump count for each level
+                    if (gameArea instanceof LevelTwoGameArea levelTwoArea && jumpCount == 20) {
+                        levelTwoArea.laserShowerChecker(playerPos.x, playerPos.y,3.5f);
+                        jumpCount = 0;
+                    }
+                }
+                // Boss-level laser logic
+                if (gameArea instanceof BossLevelGameArea bossLevel) {
+                    Vector2 currentPlayerPos = player.getPosition().cpy();
+                    if (currentPlayerPos.x < 62f) { // skip laser when player is beyond x = 61
+                        laserTimer += delta;
+                        if (laserTimer >= 30f) {
+                            bossLevel.laserShowerChecker(playerPos.x, playerPos.y,2.5f);// spawn lasers
+                            laserTimer = 0f; // reset timer
+                        }
+                    }else{
+                        laserTimer=0f;
+                    }
+                }
+            }
+        }
+        renderer.render(lightingEngine);  // new render flow used to render lights in the game screen only.
+    }
+
+  /**
+   * Updates the camera position to follow the player entity.
+   * The camera only moves when the player is near the edge of the screen.
+   */
+  private void updateCameraFollow() {
+    Entity player = gameArea.getPlayer();
+    if (player == null) return;
+
+    final Camera camera = renderer.getCamera().getCamera();
+    final Vector2 playerPosition = player.getPosition();
+
+    // Get camera viewport dimensions
+    float viewW = camera.viewportWidth;
+    float viewH = camera.viewportHeight;
+
+    // Calculate deadzone boundaries (area where camera doesn't move)
+    float dzW = viewW * DEADZONE_H_FRAC;
+    float dzH = viewH * DEADZONE_V_FRAC;
+
+    float dzLeft   = camera.position.x - dzW * 0.1f;
+    float dzRight  = camera.position.x + dzW * 0.1f;
+    float dzBottom = camera.position.y - dzH * 0.20f;
+    float dzTop    = camera.position.y + dzH * 0.30f;
+
+    // Calculate target camera position
+    float targetX = camera.position.x;
+    float targetY = camera.position.y;
+
+    // Only move camera if player is outside the deadzone
+    if (playerPosition.x < dzLeft) {
+      // Player is too far left, move camera left
+      targetX -= (dzLeft - playerPosition.x);
+    } else if (playerPosition.x > dzRight) {
+      // Player is too far right, move camera right
+      targetX += (playerPosition.x - dzRight);
+    }
+
+    // Don't move camera down if player is below the minium height camera following height
+    if (playerPosition.y >= MIN_CAMERA_FOLLOW_Y) {
+      if (playerPosition.y < dzBottom) {
+        // Player is too far down, move camera down
+        targetY -= (dzBottom - playerPosition.y);
+      } else if (playerPosition.y > dzTop) {
+        // Player is too far up, move camera up
+        targetY += (playerPosition.y - dzTop);
+      }
+    }
+
+    // Smoothly interpolate camera position for smooth movement
+    camera.position.x += (targetX - camera.position.x) * CAMERA_LERP_X;
+    camera.position.y += (targetY - camera.position.y) * CAMERA_LERP_Y;
+    camera.update();
+  }
+
+
+  @Override
+  public void resize(int width, int height) {
+    renderer.resize(width, height);
+    logger.trace("Resized renderer: ({} x {})", width, height);
+  }
+
+  @Override
+  public void pause() {
+    logger.info("Game paused");
+  }
+
+  @Override
+  public void resume() {
+    logger.info("Game resumed");
+  }
+
+  @Override
+  public void dispose() {
+    logger.debug("Disposing main game screen");
+
+    ServiceLocator.getEntityService().dispose();
+    lightingEngine.dispose();
+    renderer.dispose();
+    unloadAssets();
+    ServiceLocator.getRenderService().dispose();
+    ServiceLocator.getResourceService().dispose();
+    ServiceLocator.getVfxService().dispose();
+
+    ServiceLocator.clear();
+  }
+
+  private void loadAssets() {
+    logger.debug("Loading assets");
+    ResourceService resourceService = ServiceLocator.getResourceService();
+    resourceService.loadTextures(mainGameTextures);
+    resourceService.loadTextures(TERMINAL_TEXTURES);
+    ServiceLocator.getResourceService().loadAll();
+  }
+
+  private void unloadAssets() {
+    logger.debug("Unloading assets");
+    ResourceService resourceService = ServiceLocator.getResourceService();
+    resourceService.unloadAssets(mainGameTextures);
+    resourceService.unloadAssets(TERMINAL_TEXTURES);
+  }
+
+  public boolean isPaused() {
+    return paused;
+  }
+
+  public void togglePaused() {
+    paused = !paused;
+  }
+
+  public void togglePauseMenu(Tab tab) {
+    pauseMenuDisplay.setVisible(paused);
+    if (paused) pauseMenuDisplay.setTab(tab);
+  }
+
+  /**
+   * Creates the main game's ui including components for rendering ui elements to the screen and
+   * capturing and handling ui input.
+   */
+  private void createUI() {
+    logger.debug("Creating ui");
+    if (gameArea.getPlayer() == null) {
+      throw new IllegalStateException("GameArea has a null player");
+    }
+
+    pauseMenuDisplay = new PauseMenuDisplay(this, this.game);
+    deathScreenDisplay = new DeathScreenDisplay(this, this.game);
+    pauseInput = new PauseInputComponent(this);
+
+    Stage stage = ServiceLocator.getRenderService().getStage();
+
+    // Build your puzzle bank (spritesheet-driven)
+    SimpleCaptchaBank bank = buildCaptchaBank();
+
+    Entity ui = new Entity();
+    ui.addComponent(new InputDecorator(stage, 10))
+            .addComponent(new PerformanceDisplay())
+            .addComponent(new MainGameActions(this.game))
+            .addComponent(pauseMenuDisplay)
+            .addComponent(deathScreenDisplay)
+            .addComponent(pauseInput)
+            .addComponent(new TerminalUiComponent(this).setCaptchaBank(bank));
+
+    ServiceLocator.getEntityService().register(ui);
+    ServiceLocator.getComputerTerminalService().registerUiEntity(ui);
+  }
+  private void hideHUD() {
+        if (minimapDisplay != null) minimapDisplay.setVisible(false);
+        if (playerStatsDisplay != null) playerStatsDisplay.setVisible(false);
+        if (levelTagDisplay != null) levelTagDisplay.setVisible(false);
+    }
+
+    private void showHUD() {
+        if (minimapDisplay != null) minimapDisplay.setVisible(true);
+        if (playerStatsDisplay != null) playerStatsDisplay.setVisible(true);
+        if (levelTagDisplay != null) levelTagDisplay.setVisible(true);
+    }
+
+  /**
+   * Shows the death screen overlay
+   */
+  private void showDeathScreen() {
+    if (gameArea != null && gameArea.getPlayer() != null) {
+      gameArea.recordDeathLocation(gameArea.getPlayer().getPosition());
+    }
+
+    deathScreenDisplay.setVisible(true);
+  }
+
+  /**
+   * Reset game area and re-add player's death listener
+   */
+  public void reset() {
+    jumpCount = 0;
+    laserTimer = 0f;
+    gameArea.reset();
+  }
+
+  public void onGameAreaReset(Entity player) {
+    player.getEvents().addListener(PLAYER_DIED, this::showDeathScreen);
+  }
+
+  // Set last keycode for inventory when tab is clicked
+  public void reflectPauseTabClick(Tab tab) {
+    if (pauseInput != null) {
+      pauseInput.setLastKeycodeForTab(tab);
+    }
+  }
+}

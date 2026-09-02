@@ -1,0 +1,71 @@
+package com.csse3200.game.components;
+
+import com.badlogic.gdx.graphics.Camera;
+import com.badlogic.gdx.graphics.OrthographicCamera;
+import com.badlogic.gdx.math.Matrix4;
+import com.badlogic.gdx.math.Vector2;
+
+/**
+ * CameraComponent to control aspects of the camera in game.
+ */
+public class CameraComponent extends Component {
+  private final Camera camera;
+  private Vector2 lastPosition;
+
+  /**
+   * Sets Orthographic Camera
+   */
+  public CameraComponent() {
+    this(new OrthographicCamera());
+  }
+
+  /**
+   * Used for camera reset/change
+   * @param camera
+   */
+  public CameraComponent(Camera camera) {
+    this.camera = camera;
+    lastPosition = Vector2.Zero.cpy();
+  }
+
+  @Override
+  public void update() {
+    Vector2 position = entity.getPosition();
+    if (!lastPosition.epsilonEquals(entity.getPosition())) {
+      camera.position.set(position.x, position.y, 0f);
+      lastPosition = position;
+      camera.update();
+    }
+  }
+
+  /**
+   * Getter for Projection Matrix
+   * @return Matrix4 Projection Matrix
+   */
+  public Matrix4 getProjectionMatrix() {
+    return camera.combined;
+  }
+
+  /**
+   * Returns camera
+   * @return camera
+   */
+  public Camera getCamera() {
+    return camera;
+  }
+
+  /**
+   * Resizes the camera FOV
+   * @param screenWidth
+   * @param screenHeight
+   * @param gameWidth
+   */
+  public void resize(int screenWidth, int screenHeight, float gameWidth) {
+    float ratio = (float) screenHeight / screenWidth;
+    //for level creation, easier to see entire level at once
+    float zoom = 1f;
+    camera.viewportWidth = gameWidth * zoom;
+    camera.viewportHeight = gameWidth * ratio*zoom;
+    camera.update();
+  }
+}

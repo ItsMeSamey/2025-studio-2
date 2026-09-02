@@ -1,0 +1,170 @@
+package com.csse3200.game.services;
+
+import com.crashinvaders.vfx.VfxManager;
+import com.csse3200.game.entities.EntityService;
+import com.csse3200.game.input.InputService;
+import com.csse3200.game.lighting.LightingService;
+import com.csse3200.game.lighting.SecurityCamRetrievalService;
+import com.csse3200.game.physics.PhysicsService;
+import com.csse3200.game.rendering.RenderService;
+import com.csse3200.game.screens.MainGameScreen;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * A simplified implementation of the Service Locator pattern:
+ * https://martinfowler.com/articles/injection.html#UsingAServiceLocator
+ *
+ * <p>Allows global access to a few core game services.
+ * Warning: global access is a trap and should be used <i>extremely</i> sparingly.
+ * Read the wiki for details (https://github.com/UQcsse3200/game-engine/wiki/Service-Locator).
+ */
+public class ServiceLocator {
+  private static final Logger logger = LoggerFactory.getLogger(ServiceLocator.class);
+  private static EntityService entityService;
+  private static RenderService renderService;
+  private static PhysicsService physicsService;
+  private static GameTime timeSource;
+  private static InputService inputService;
+  private static ResourceService resourceService;
+  private static LightingService lightingService;
+  private static MinimapService minimapService;
+  private static SecurityCamRetrievalService securityCamRetrievalService;
+  private static VfxManager vfxService;
+  private static CodexService codexService;
+  private static ComputerTerminalService computerTerminalService;
+
+  private static MainGameScreen mainGameScreen;
+
+  public static LightingService getLightingService() {
+    return lightingService;
+  }
+
+  public static VfxManager getVfxService() {
+    return vfxService;
+  }
+
+  public static SecurityCamRetrievalService getSecurityCamRetrievalService() {
+    return securityCamRetrievalService;
+  }
+
+  public static EntityService getEntityService() {
+    return entityService;
+  }
+
+  public static RenderService getRenderService() {
+    return renderService;
+  }
+
+  public static PhysicsService getPhysicsService() {
+    return physicsService;
+  }
+
+  public static GameTime getTimeSource() {
+    return timeSource;
+  }
+
+  public static InputService getInputService() {
+    return inputService;
+  }
+
+  public static ResourceService getResourceService() {
+    return resourceService;
+  }
+
+  public static MinimapService getMinimapService() {
+    return minimapService;
+  }
+
+  public static CodexService getCodexService() { return codexService; }
+
+  public static ComputerTerminalService getComputerTerminalService() { return computerTerminalService; }
+
+  public static MainGameScreen getMainGameScreen() {
+    return mainGameScreen;
+  }
+
+  public static void registerMainGameScreen(MainGameScreen screen) {
+      logger.debug("Registering main game screen {}", screen);
+      mainGameScreen = screen;
+  }
+
+  public static void registerLightingService(LightingService service) {
+    logger.debug("Registering lighting service {}", service);
+    lightingService = service;
+  }
+
+  public static void registerSecurityCamRetrievalService(SecurityCamRetrievalService service) {
+    logger.debug("Registering security camera retrieval service {}", service);
+    securityCamRetrievalService = service;
+  }
+
+  public static void registerEntityService(EntityService service) {
+    logger.debug("Registering entity service {}", service);
+    entityService = service;
+  }
+
+  public static void registerRenderService(RenderService service) {
+    logger.debug("Registering render service {}", service);
+    renderService = service;
+  }
+
+  public static void registerPhysicsService(PhysicsService service) {
+    logger.debug("Registering physics service {}", service);
+    physicsService = service;
+  }
+
+  public static void registerTimeSource(GameTime source) {
+    logger.debug("Registering time source {}", source);
+    timeSource = source;
+  }
+
+  public static void registerInputService(InputService source) {
+    logger.debug("Registering input service {}", source);
+    inputService = source;
+  }
+
+  public static void registerResourceService(ResourceService source) {
+    logger.debug("Registering resource service {}", source);
+    resourceService = source;
+  }
+
+  public static void registerMinimapService(MinimapService source) {
+    logger.debug("Registering minimap service {}", source);
+    minimapService = source;
+  }
+
+  public static void registerVfxService(VfxManager service) {
+    logger.debug("Registering VFX service {}", service);
+    vfxService = service;
+  }
+
+  public static void registerCodexService(CodexService source) {
+    logger.debug("Registering codex service {}", source);
+    codexService = source;
+  }
+
+  public static void registerComputerTerminalService(ComputerTerminalService service) {
+    logger.debug("Registering computer terminal service {}", service);
+    computerTerminalService = service;
+  }
+
+  public static void clear() {
+    entityService = null;
+    renderService = null;
+    physicsService = null;
+    timeSource = null;
+    inputService = null;
+    resourceService = null;
+    lightingService = null;
+    minimapService = null;
+    securityCamRetrievalService = null;
+    vfxService = null;
+    codexService = null;
+    computerTerminalService = null;
+  }
+
+  private ServiceLocator() {
+    throw new IllegalStateException("Instantiating static util class");
+  }
+}
